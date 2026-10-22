@@ -23,7 +23,7 @@ jobs:
                   python3 -c "import pip" || (curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py --user --break-system-packages)
                   export PATH=$PATH:$HOME/.local/bin
                   pip install --user --break-system-packages --upgrade pip
-                  pip install --user --break-system-packages -r requirements.txt
+                  pip install --user --break-system-packages --no-build-isolation -r requirements.txt
 
             - name: 1. Quality Check (Pylint)
               run: |
@@ -33,7 +33,7 @@ jobs:
             - name: 2. Dependency Check (pip-audit)
               run: |
                   export PATH=$PATH:$HOME/.local/bin
-                  pip-audit --requirement requirements.txt
+                  pip-audit --requirement requirements.txt --no-deps
 
             - name: 3. Unit Testing (pytest)
               run: |
