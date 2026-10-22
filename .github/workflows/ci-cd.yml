@@ -18,23 +18,27 @@ jobs:
             - name: Checkout Source Code
               uses: actions/checkout@v4
 
-            - name: Setup Virtual Environment & Install Dependencies
+            - name: Setup Pip & Install Dependencies
               run: |
-                  python3 -m venv venv
-                  ./venv/bin/pip install --upgrade pip
-                  ./venv/bin/pip install -r requirements.txt
+                  python3 -c "import pip" || (curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py --user --break-system-packages)
+                  export PATH=$PATH:$HOME/.local/bin
+                  pip install --user --break-system-packages --upgrade pip
+                  pip install --user --break-system-packages -r requirements.txt
 
             - name: 1. Quality Check (Pylint)
               run: |
-                  ./venv/bin/pylint --fail-under=9.0 app.py
+                  export PATH=$PATH:$HOME/.local/bin
+                  pylint --fail-under=9.0 app.py
 
             - name: 2. Dependency Check (pip-audit)
               run: |
-                  ./venv/bin/pip-audit --requirement requirements.txt
+                  export PATH=$PATH:$HOME/.local/bin
+                  pip-audit --requirement requirements.txt
 
             - name: 3. Unit Testing (pytest)
               run: |
-                  ./venv/bin/pytest tests/
+                  export PATH=$PATH:$HOME/.local/bin
+                  pytest tests/
 
             - name: 4. Build Docker Image
               run: |
