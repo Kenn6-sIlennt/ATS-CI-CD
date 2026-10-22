@@ -20,10 +20,9 @@ jobs:
 
             - name: Setup Pip & Install Dependencies
               run: |
-                  python3 -c "import pip" || (curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py --user --break-system-packages)
-                  export PATH=$PATH:$HOME/.local/bin
-                  pip install --user --break-system-packages --upgrade pip
-                  pip install --user --break-system-packages --no-build-isolation -r requirements.txt
+                  python -m pip install --upgrade pip
+                  pip install pip-audit
+                  pip install -r requirements.txt
 
             - name: 1. Quality Check (Pylint)
               run: |
