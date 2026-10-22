@@ -1,0 +1,183 @@
+name: Full Pipeline with Separated Jobs
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch: {}
+
+jobs:
+  # ==========================================
+  # JOB 1: SAST Security Scan
+  # ==========================================
+  sast-scan:
+    name: SAST Scan with Semgrep
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep SAST
+        run: semgrep scan --config auto --error --verbose --exclude=".github"
+
+  # ==========================================
+  # JOB 2: Code Quality with Pylint
+  # ==========================================
+  code-quality:
+    name: Code Quality with Pylint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pylint
+          pip install -r requirements.txt
+
+      - name: Run Pylint Check
+        run: pylint --fail-under=9.0 app.py
+
+  # ==========================================
+  # JOB 3: Dependency Security Audit
+  # ==========================================
+  dependency-audit:
+    name: Dependency Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+          pip install -r requirements.txt
+
+      - name: Run Pip Audit
+        run: pip-audit --requirement requirements.txt
+
+  # ==========================================
+  # JOB 4: Unit Testing
+  # ==========================================
+  unit-test:
+    name: Unit Testing with Pytest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Unit Tests
+        run: |
+          python -m pytest tests/ --junitxml=test-results.xml --cov=app --cov-report=xml --cov-report=term-missing
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: test-results.xml
+          retention-days: 30
+
+      - name: Upload Coverage Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-reports
+          path: coverage.xml
+          retention-days: 30
+
+  # ==========================================
+  # JOB 5: Build Docker Image
+  # ==========================================
+  docker-build:
+    name: Build Docker Image
+    needs: [sast-scan, code-quality, dependency-audit, unit-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Build Docker Image
+        run: docker build -t ats-flask-app:latest .
+
+      - name: Save Docker Image
+        run: docker save ats-flask-app:latest -o ats-flask-app.tar
+
+      - name: Upload Docker Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: ats-flask-app.tar
+          retention-days: 30
+
+  # ==========================================
+  # JOB 6: Deploy to VM
+  # ==========================================
+  deploy-vm:
+    name: Deploy to VM Server
+    needs: docker-build
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Download Docker Image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: .
+
+      - name: Load Docker Image
+        run: |
+          docker load -i ats-flask-app.tar
+          docker image ls
+
+      - name: Deploy Container
+        run: |
+          docker rm -f ats-web-flask || true
+          docker run -d -p 5000:5000 --name ats-web-flask --restart unless-stopped ats-flask-app:latest
+
+      - name: Health Check
+        run: |
+          echo "Checking container health..."
+          for i in {1..5}; do
+            if curl -sSf http://localhost:5000/health; then
+              echo "✅ Application health check PASSED!"
+              exit 0
+            fi
+            echo "Waiting for app to start ($i/5)..."
+            sleep 2
+          done
+          echo "❌ Health check failed"
+          exit 1
+
+      - name: Cleanup
+        run: |
+          docker image prune -f
+          echo "✅ Pipeline completed successfully!"

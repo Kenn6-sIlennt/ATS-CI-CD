@@ -1,0 +1,102 @@
+name: CD - Deploy to VM
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ["main", "master"]
+
+jobs:
+  deploy-to-vm:
+    name: Build, Deploy & Health Check on VM
+    needs: [sast-scan, pylint-check, dependency-audit, unit-test]
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH Connection to VM
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 192.168.238.132 >> ~/.ssh/known_hosts
+
+      - name: Build and Deploy to VM
+        env:
+          VM_USER: kenn
+          VM_PASSWORD: matcha123
+          VM_HOST: 192.168.238.132
+        run: |
+          echo "Deploying to VM: $VM_HOST"
+          
+          # Copy files to VM
+          sshpass -p "$VM_PASSWORD" scp -r . "$VM_USER@$VM_HOST:/tmp/ats-ci-cd-app"
+          
+          # Execute deployment script on VM
+          sshpass -p "$VM_PASSWORD" ssh "$VM_USER@$VM_HOST" << 'EOF'
+            cd /tmp/ats-ci-cd-app
+            
+            echo "Building Docker container..."
+            docker build -t ats-flask-app:latest .
+            
+            echo "Stopping existing container if running..."
+            docker rm -f ats-web-flask || true
+            
+            echo "Running new container..."
+            docker run -d -p 5000:5000 --name ats-web-flask --restart unless-stopped ats-flask-app:latest
+            
+            echo "Waiting for container to start..."
+            sleep 5
+          EOF
+
+      - name: Container Health Check
+        env:
+          VM_USER: kenn
+          VM_PASSWORD: matcha123
+          VM_HOST: 192.168.238.132
+        run: |
+          echo "Checking container health on VM..."
+          
+          sshpass -p "$VM_PASSWORD" ssh "$VM_USER@$VM_HOST" << 'EOF'
+            echo "Checking container running state..."
+            RUNNING=$(docker inspect --format='{{.State.Running}}' ats-web-flask)
+            if [ "$RUNNING" != "true" ]; then
+              echo "ERROR: Container is not running (broken/unhealthy)."
+              exit 1
+            fi
+            
+            echo "Checking container exit code & restart count..."
+            EXIT_CODE=$(docker inspect --format='{{.State.ExitCode}}' ats-web-flask)
+            RESTART_COUNT=$(docker inspect --format='{{.RestartCount}}' ats-web-flask)
+            echo "Exit Code: $EXIT_CODE, Restart Count: $RESTART_COUNT"
+            if [ "$EXIT_CODE" != "0" ]; then
+              echo "ERROR: Container exited with error code $EXIT_CODE."
+              exit 1
+            fi
+            
+            echo "Checking container resource statistics..."
+            docker stats ats-web-flask --no-stream
+            
+            echo "Checking HTTP application endpoint health..."
+            for i in {1..5}; do
+              if curl -sSf http://localhost:5000/health; then
+                echo "Application is healthy and responding!"
+                exit 0
+              fi
+              echo "Waiting for application to start (attempt $i/5)..."
+              sleep 2
+            done
+            echo "ERROR: Application health check failed after 5 attempts."
+            exit 1
+          EOF
+
+      - name: Cleanup Deployment Files
+        env:
+          VM_USER: kenn
+          VM_PASSWORD: matcha123
+          VM_HOST: 192.168.238.132
+        run: |
+          sshpass -p "$VM_PASSWORD" ssh "$VM_USER@$VM_HOST" "rm -rf /tmp/ats-ci-cd-app"
+          echo "Deployment completed successfully!"

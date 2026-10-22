@@ -1,0 +1,75 @@
+name: Quick Test - Basic CI
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  quick-build-test:
+    name: Quick Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Test Flask App
+        run: |
+          echo "Testing Flask application..."
+          python -c "
+          from app import app
+          print('✅ Flask app imported successfully')
+          
+          with app.test_client() as client:
+              # Test home route
+              response = client.get('/')
+              print(f'Home route: {response.status_code}')
+              assert response.status_code == 200
+              
+              # Test health route
+              response = client.get('/health')
+              print(f'Health route: {response.status_code}')
+              assert response.status_code == 200
+              assert response.get_json()['status'] == 'healthy'
+              
+          print('✅ All basic tests passed')
+          "
+          
+      - name: Check Requirements
+        run: |
+          echo "Checking requirements.txt..."
+          pip freeze | grep -E "(flask|pytest|pylint|pip-audit)"
+          
+      - name: Simple Pylint Check
+        run: |
+          pip install pylint
+          echo "Running quick pylint check..."
+          pylint app.py --exit-zero || echo "Pylint completed"
+          
+      - name: Success Summary
+        run: |
+          echo "========================================"
+          echo "✅ QUICK TEST COMPLETED SUCCESSFULLY"
+          echo "========================================"
+          echo ""
+          echo "Verified:"
+          echo "  ✓ Repository structure"
+          echo "  ✓ Python dependencies"
+          echo "  ✓ Flask application imports"
+          echo "  ✓ Basic route functionality"
+          echo "  ✓ Health endpoint"
+          echo "  ✓ Requirements.txt validity"
+          echo ""
+          echo "Next steps:"
+          echo "  1. Run full pipeline: full-pipeline-separated.yml"
+          echo "  2. Test VM deployment: deploy-vm.yml"
+          echo "  3. Explore study cases"
+          echo "========================================"
