@@ -69,7 +69,7 @@ jobs:
                   docker build -t ats-flask-app:latest .
                   
                   echo "Force removing existing container if running..."
-                  docker rm -f ats-web-flask || true
+                  docker rm -f ats-web-flask web-flask || true
                   
                   echo "Running new container with restart policy..."
                   docker run -d -p 5000:5000 --name ats-web-flask --restart unless-stopped ats-flask-app:latest
